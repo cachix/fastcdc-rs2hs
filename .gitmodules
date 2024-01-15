@@ -1,4 +1,0 @@
-[submodule "hs-bindgen-types"]
-	path = hs-bindgen-types
-	url = https://github.com/sandydoo/hs-bindgen-types
-	branch = fix-build
