@@ -16,13 +16,19 @@ import Foreign.Marshal.Utils
 import Foreign.Ptr
 import Foreign.Storable (poke)
 import GHC.IO.Handle.FD (withFile)
+import System.Environment (getArgs)
 import System.IO (IOMode (ReadMode))
 
 main :: IO ()
 main = do
+  path <-
+    getArgs >>= \case
+      [path] -> return path
+      _otherwise -> error "Usage: fastcdc-sample <file>"
+
   let chunkerOptions = ChunkerOptions {minChunkSize = 512, avgChunkSize = 1024, maxChunkSize = 4096}
 
-  withChunker "sample.txt" chunkerOptions $ \chunker ->
+  withChunker path chunkerOptions $ \chunker ->
     fix $ \loop -> do
       more <- inspectNextChunk chunker
       when more loop
