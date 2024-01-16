@@ -12,11 +12,11 @@ module FastCDC.V2020.FFI
     c_chunker_new,
     c_chunker_next,
     c_chunker_free,
+    c_wrap_reader_func,
   )
 where
 
 import Data.Word
-import Foreign.C.String
 import Foreign.C.Types
 import Foreign.Ptr
 import Foreign.Storable
@@ -70,13 +70,19 @@ instance Storable ChunkData where
     pokeByteOff ptr 16 clength
     poke (plusPtr ptr 24) cdata
 
-foreign import ccall safe "chunker_new" c_chunker_new :: CString -> Ptr ChunkerOptions -> IO (Ptr StreamCDC)
+type Callback = Ptr Word8 -> CSize -> IO CInt
+
+foreign import ccall "wrapper" c_wrap_reader_func :: Callback -> IO (FunPtr Callback)
+
+foreign import ccall "chunker_new" c_chunker_new :: FunPtr Callback -> Ptr ChunkerOptions -> IO (Ptr StreamCDC)
 
 foreign import ccall safe "chunker_next" c_chunker_next :: Ptr StreamCDC -> IO (Ptr ChunkData)
 
 foreign import ccall safe "chunker_free" c_chunker_free :: Ptr StreamCDC -> IO ()
 
-nextChunk :: Ptr StreamCDC -> IO ChunkData
+nextChunk :: Ptr StreamCDC -> IO (Maybe ChunkData)
 nextChunk chunker = do
   cdata <- c_chunker_next chunker
-  peek cdata
+  if cdata == nullPtr
+    then return Nothing
+    else Just <$> peek cdata

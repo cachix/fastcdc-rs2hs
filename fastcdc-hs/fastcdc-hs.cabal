@@ -59,7 +59,7 @@ library
     default-extensions: DerivingStrategies, NamedFieldPuns
 
     -- Other library packages from which modules are imported.
-    build-depends:    base, c-storable-deriving
+    build-depends:    base
 
     -- Directories containing source files.
     hs-source-dirs:   src
