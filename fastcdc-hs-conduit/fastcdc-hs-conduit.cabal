@@ -10,7 +10,6 @@ maintainer:         hey@sandydoo.me
 -- copyright:
 build-type:         Simple
 extra-doc-files:    CHANGELOG.md
--- extra-source-files:
 
 common warnings
     ghc-options: -Wall
@@ -21,6 +20,7 @@ library
     build-depends:    base <5
                     , bytestring
                     , conduit
+                    , unliftio-core
                     , fastcdc-hs
     hs-source-dirs:   src
     default-language: GHC2021

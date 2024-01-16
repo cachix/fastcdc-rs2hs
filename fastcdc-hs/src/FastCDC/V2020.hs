@@ -6,19 +6,15 @@ module FastCDC.V2020
 
 import qualified FastCDC.V2020.FFI as FFI
 
-import Control.Exception (bracket)
 import Control.Monad (unless)
-import Control.Monad.Fix (fix)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BS.Internal
-import Data.Word
 import Foreign.C.Types
-import Foreign.ForeignPtr
-import Foreign.Marshal.Alloc
-import Foreign.Marshal.Array
-import Foreign.Marshal.Utils
 import Foreign.Ptr
-import Foreign.Storable (poke)
+import Control.Monad.IO.Unlift (MonadUnliftIO, liftIO)
+import UnliftIO.Foreign (withForeignPtr, alloca, copyBytes, Word8, poke)
+import UnliftIO.Exception (bracket)
+
 
 
 data FastCDCOptions = FastCDCOptions
@@ -39,19 +35,21 @@ data Chunk = Chunk
   deriving stock (Show)
 
 
-withFastCDC :: FastCDCOptions -> BS.ByteString -> (Chunk -> IO ()) -> IO ()
+withFastCDC :: MonadUnliftIO m => FastCDCOptions -> BS.ByteString -> (Chunk -> m ()) -> m ()
 withFastCDC options source action = do
-    readFunPtr <- FFI.c_wrap_reader_func readSome
+    readFunPtr <- liftIO $ FFI.c_wrap_reader_func readSome
 
     alloca $ \chunkerOptsPtr -> do
-      poke chunkerOptsPtr $ FFI.ChunkerOptions
+      liftIO $ poke chunkerOptsPtr $ FFI.ChunkerOptions
         { FFI.minChunkSize = fromIntegral $ minChunkSize options
         , FFI.avgChunkSize = fromIntegral $ avgChunkSize options
         , FFI.maxChunkSize = fromIntegral $ maxChunkSize options
         }
-      bracket (FFI.c_chunker_new readFunPtr chunkerOptsPtr) FFI.c_chunker_free processChunks
+      bracket (liftIO $ FFI.c_chunker_new readFunPtr chunkerOptsPtr) 
+              (liftIO . FFI.c_chunker_free)
+              processChunks
   where
-    readSome :: Ptr Word8 -> CSize -> IO CInt
+    readSome :: MonadUnliftIO m => Ptr Word8 -> CSize -> m CInt
     readSome buf size = do
         let bs = BS.take (fromIntegral size) source
         let (fp, offset, len) = BS.Internal.toForeignPtr bs
@@ -60,8 +58,9 @@ withFastCDC options source action = do
             copyBytes buf p' len
             return $ fromIntegral len
 
+    --processChunks :: MonadUnliftIO m => Ptr FFI.StreamCDC -> m ()
     processChunks chunker = do
-      mchunk <- FFI.nextChunk chunker
+      mchunk <- liftIO $ FFI.nextChunk chunker
       case mchunk of
         Just chunk -> unless (FFI.clength chunk == 0) $ do
             action $ Chunk
