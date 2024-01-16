@@ -4,6 +4,8 @@ import System.Environment (getArgs)
 import FastCDC.V2020
 import qualified Data.ByteString as BS
 import GHC.IO.Handle.FD (withFile)
+import Control.Monad.Trans.Resource
+import Control.Monad.IO.Class (liftIO)
 import System.IO (IOMode (ReadMode))
 
 options :: FastCDCOptions
@@ -22,5 +24,5 @@ main = do
 
   withFile path ReadMode $ \handle -> do
     bs <- BS.hGetContents handle
-    withFastCDC options bs $ \chunk ->
-        putStrLn $ "Chunk: " <> show chunk
+    runResourceT $ withFastCDC options bs $ \chunk ->
+        liftIO $ putStrLn $ "Chunk: " <> show chunk

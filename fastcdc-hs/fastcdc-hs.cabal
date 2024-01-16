@@ -40,7 +40,7 @@ library
     exposed-modules:  FastCDC.V2020
     other-modules:    FastCDC.V2020.FFI
     default-extensions: DerivingStrategies, NamedFieldPuns
-    build-depends:    base, bytestring, unliftio-core, unliftio
+    build-depends:    base, bytestring, resourcet
     hs-source-dirs:   src
     default-language: Haskell2010
     -- https://gitlab.haskell.org/ghc/ghc/-/issues/22564
@@ -49,7 +49,7 @@ library
 executable fastcdc
     import:           warnings
     main-is:          Main.hs
-    build-depends:    base, fastcdc-hs, bytestring
+    build-depends:    base, fastcdc-hs, bytestring, resourcet
     hs-source-dirs:   fastcdc
     default-language: Haskell2010
     ghc-options:      -threaded -rtsopts -with-rtsopts=-N

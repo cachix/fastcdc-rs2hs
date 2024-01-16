@@ -8,9 +8,10 @@ import Data.ByteString (ByteString)
 import Data.Foldable (for_)
 import Conduit
 import FastCDC.V2020
+import Control.Monad.IO.Class (MonadIO, liftIO)
 
 
-fastCDC :: MonadUnliftIO m => FastCDCOptions -> ConduitT ByteString Chunk m ()
+fastCDC :: MonadIO m => FastCDCOptions -> ConduitT ByteString Chunk (ResourceT m) ()
 fastCDC options = 
     takeCE (minChunkSize options) 
-  .| (awaitForever $ \bs -> withFastCDC options bs yield)
+  .| (awaitForever $ \bs -> lift $ withFastCDC options bs yield)

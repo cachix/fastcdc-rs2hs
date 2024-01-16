@@ -7,13 +7,18 @@ module FastCDC.V2020
 import qualified FastCDC.V2020.FFI as FFI
 
 import Control.Monad (unless)
+import Control.Exception (bracket)
+import Control.Monad.IO.Class (MonadIO, liftIO)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BS.Internal
 import Foreign.C.Types
 import Foreign.Ptr
-import Control.Monad.IO.Unlift (MonadUnliftIO, liftIO)
-import UnliftIO.Foreign (withForeignPtr, alloca, copyBytes, Word8, poke)
-import UnliftIO.Exception (bracket)
+import Foreign.Storable
+import Foreign.Marshal.Alloc
+import Foreign.ForeignPtr
+import Control.Monad.Trans.Resource
+import Foreign.Marshal.Utils
+import Data.Word
 
 
 
@@ -35,30 +40,34 @@ data Chunk = Chunk
   deriving stock (Show)
 
 
-withFastCDC :: MonadUnliftIO m => FastCDCOptions -> BS.ByteString -> (Chunk -> m ()) -> m ()
+withFastCDC :: MonadIO m => FastCDCOptions -> BS.ByteString -> (Chunk -> ResourceT m ()) -> ResourceT m ()
 withFastCDC options source action = do
     readFunPtr <- liftIO $ FFI.c_wrap_reader_func readSome
 
-    alloca $ \chunkerOptsPtr -> do
-      liftIO $ poke chunkerOptsPtr $ FFI.ChunkerOptions
+    (_, chunkerOptsPtr) <- allocate 
+                        (malloc :: IO (Ptr FFI.ChunkerOptions)) 
+                        free
+    liftIO $ do
+      poke chunkerOptsPtr $ FFI.ChunkerOptions
         { FFI.minChunkSize = fromIntegral $ minChunkSize options
         , FFI.avgChunkSize = fromIntegral $ avgChunkSize options
         , FFI.maxChunkSize = fromIntegral $ maxChunkSize options
         }
-      bracket (liftIO $ FFI.c_chunker_new readFunPtr chunkerOptsPtr) 
-              (liftIO . FFI.c_chunker_free)
-              processChunks
+    (_, chunker) <- allocate 
+                      (FFI.c_chunker_new readFunPtr chunkerOptsPtr) 
+                      FFI.c_chunker_free
+    processChunks chunker
   where
-    readSome :: MonadUnliftIO m => Ptr Word8 -> CSize -> m CInt
+    readSome :: MonadIO m => Ptr Word8 -> CSize -> m CInt
     readSome buf size = do
         let bs = BS.take (fromIntegral size) source
         let (fp, offset, len) = BS.Internal.toForeignPtr bs
-        withForeignPtr fp $ \p -> do
+        liftIO $ withForeignPtr fp $ \p -> do
             let p' = p `plusPtr` offset
             copyBytes buf p' len
             return $ fromIntegral len
 
-    --processChunks :: MonadUnliftIO m => Ptr FFI.StreamCDC -> m ()
+    --processChunks :: Ptr FFI.StreamCDC -> m ()
     processChunks chunker = do
       mchunk <- liftIO $ FFI.nextChunk chunker
       case mchunk of

@@ -19,8 +19,8 @@ library
     exposed-modules:  Data.Conduit.FastCDC.V2020
     build-depends:    base <5
                     , bytestring
+                    , mtl
                     , conduit
-                    , unliftio-core
                     , fastcdc-hs
     hs-source-dirs:   src
     default-language: GHC2021
