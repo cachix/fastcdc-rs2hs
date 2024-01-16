@@ -7,6 +7,7 @@ module FastCDC.V2020.FFI
     StreamCDC,
     ChunkerOptions (..),
     ChunkData (..),
+    ReaderFunc,
 
     -- * FFI
     c_chunker_new,
@@ -70,11 +71,17 @@ instance Storable ChunkData where
     pokeByteOff ptr 16 clength
     poke (plusPtr ptr 24) cdata
 
-type Callback = Ptr Word8 -> CSize -> IO CInt
+type ReaderFunc =
+  -- | A mutable buffer to write to.
+  Ptr Word8 ->
+  -- | The size of the write buffer.
+  CSize ->
+  -- | The number of bytes written or an error.
+  IO CInt
 
-foreign import ccall "wrapper" c_wrap_reader_func :: Callback -> IO (FunPtr Callback)
+foreign import ccall "wrapper" c_wrap_reader_func :: ReaderFunc -> IO (FunPtr ReaderFunc)
 
-foreign import ccall "chunker_new" c_chunker_new :: FunPtr Callback -> Ptr ChunkerOptions -> IO (Ptr StreamCDC)
+foreign import ccall "chunker_new" c_chunker_new :: FunPtr ReaderFunc -> Ptr ChunkerOptions -> IO (Ptr StreamCDC)
 
 foreign import ccall safe "chunker_next" c_chunker_next :: Ptr StreamCDC -> IO (Ptr ChunkData)
 
