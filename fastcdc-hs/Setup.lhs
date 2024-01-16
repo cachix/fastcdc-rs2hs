@@ -50,7 +50,7 @@ https://github.com/haskell/cabal/issues/2641
 >       libraryBuildInfo = PD.libBuildInfo library
 >   targetDirs <-
 >     forM ["target/release", "target/debug"] $ \path ->
->       canonicalizePath ("../fastcdc-rs-ffi" </> path)
+>       canonicalizePath (".." </> path)
 >   putStrLn $ "Searching for fastcdc-rs-ffi build: " <> show targetDirs
 >   return localBuildInfo
 >     { localPkgDescr = packageDescription
