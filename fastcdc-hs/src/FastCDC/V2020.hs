@@ -19,8 +19,6 @@ import Foreign.Marshal.Array
 import Foreign.Marshal.Utils
 import Foreign.Ptr
 import Foreign.Storable (poke)
-import GHC.IO.Handle.FD (withFile)
-import System.IO (IOMode (ReadMode))
 
 
 data FastCDCOptions = FastCDCOptions
@@ -41,18 +39,8 @@ data Chunk = Chunk
   deriving stock (Show)
 
 
-withFastCDC :: FilePath -> FastCDCOptions -> (Chunk -> IO ()) -> IO ()
-withFastCDC path options action = do
-  withFile path ReadMode $ \handle -> do
-    let readSome :: Ptr Word8 -> CSize -> IO CInt
-        readSome buf size = do
-          bs <- BS.hGetSome handle (fromIntegral size)
-          let (fp, offset, len) = BS.Internal.toForeignPtr bs
-          withForeignPtr fp $ \p -> do
-            let p' = p `plusPtr` offset
-            copyBytes buf p' len
-            return $ fromIntegral len
-
+withFastCDC :: FastCDCOptions -> BS.ByteString -> (Chunk -> IO ()) -> IO ()
+withFastCDC options source action = do
     readFunPtr <- FFI.c_wrap_reader_func readSome
 
     alloca $ \chunkerOptsPtr -> do
@@ -63,6 +51,15 @@ withFastCDC path options action = do
         }
       bracket (FFI.c_chunker_new readFunPtr chunkerOptsPtr) FFI.c_chunker_free processChunks
   where
+    readSome :: Ptr Word8 -> CSize -> IO CInt
+    readSome buf size = do
+        let bs = BS.take (fromIntegral size) source
+        let (fp, offset, len) = BS.Internal.toForeignPtr bs
+        withForeignPtr fp $ \p -> do
+            let p' = p `plusPtr` offset
+            copyBytes buf p' len
+            return $ fromIntegral len
+
     processChunks chunker = do
       mchunk <- FFI.nextChunk chunker
       case mchunk of

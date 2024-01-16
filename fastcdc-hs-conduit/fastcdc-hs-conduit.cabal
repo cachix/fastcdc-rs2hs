@@ -18,7 +18,7 @@ common warnings
 library
     import:           warnings
     exposed-modules:  Data.Conduit.FastCDC.V2020
-    build-depends:    base ^>=4.17.2.1
+    build-depends:    base <5
                     , bytestring
                     , conduit
                     , fastcdc-hs

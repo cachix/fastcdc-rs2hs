@@ -2,6 +2,9 @@ module Main where
 
 import System.Environment (getArgs)
 import FastCDC.V2020
+import qualified Data.ByteString as BS
+import GHC.IO.Handle.FD (withFile)
+import System.IO (IOMode (ReadMode))
 
 options :: FastCDCOptions
 options = FastCDCOptions
@@ -17,5 +20,7 @@ main = do
     [path] -> return path
     _otherwise -> error "Usage: fastcdc <file>"
 
-  withFastCDC path options $ \chunk ->
-    putStrLn $ "Chunk: " <> show chunk
+  withFile path ReadMode $ \handle -> do
+    bs <- BS.hGetContents handle
+    withFastCDC options bs $ \chunk ->
+        putStrLn $ "Chunk: " <> show chunk
