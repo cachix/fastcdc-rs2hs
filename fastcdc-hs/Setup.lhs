@@ -4,6 +4,7 @@ call `cargo` on the fly and link correctly the generated library.
 While it's an acceptable hack as this project is currently a prototype, this
 should be removed before `cargo-cabal` stable release.
 
+> import Control.Monad (forM)
 > import Data.Maybe
 > import qualified Distribution.PackageDescription as PD
 > import Distribution.Simple
@@ -24,7 +25,8 @@ should be removed before `cargo-cabal` stable release.
 >   ( UserHooks (buildHook, confHook),
 >   )
 > import Distribution.Simple.Utils (rawSystemExit)
-> import System.Directory (getCurrentDirectory)
+> import System.Directory (getCurrentDirectory, canonicalizePath, makeAbsolute)
+> import System.FilePath ((</>))
 >
 > main :: IO ()
 > main =
@@ -46,17 +48,18 @@ https://github.com/haskell/cabal/issues/2641
 >   let packageDescription = localPkgDescr localBuildInfo
 >       library = fromJust $ PD.library packageDescription
 >       libraryBuildInfo = PD.libBuildInfo library
->   dir <- getCurrentDirectory
+>   targetDirs <-
+>     forM ["target/release", "target/debug"] $ \path ->
+>       canonicalizePath ("../fastcdc-rs-ffi" </> path)
+>   putStrLn $ "Searching for fastcdc-rs-ffi build: " <> show targetDirs
 >   return localBuildInfo
 >     { localPkgDescr = packageDescription
 >       { PD.library = Just $ library
 >         { PD.libBuildInfo = libraryBuildInfo
->           { PD.extraLibDirs = (dir ++ "/target/release") :
->                               (dir ++ "/target/debug") :
->             PD.extraLibDirs libraryBuildInfo
+>           { PD.extraLibDirs = targetDirs ++ PD.extraLibDirs libraryBuildInfo
 >     } } } }
 
-It would be nice to remove this hook ot some point, e.g., if this RFC is merged
+It would be nice to remove this hook at some point, e.g., if this RFC is merged
 in Cabal https://github.com/haskell/cabal/issues/7906
 
 % rustBuildHook ::

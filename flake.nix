@@ -2,20 +2,30 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-23.11";
     flake-utils.url = "github:numtide/flake-utils";
-    cargo-cabal.url = "github:yvan-sraka/cargo-cabal";
+    rust-overlay = {
+      url = "github:oxalica/rust-overlay";
+      inputs = {
+        nixpkgs.follows = "nixpkgs";
+        flake-utils.follows = "flake-utils";
+      };
+    };
   };
 
-  outputs = { nixpkgs, flake-utils, cargo-cabal, ... }:
+  outputs = { nixpkgs, flake-utils, rust-overlay, ... }:
     flake-utils.lib.eachDefaultSystem (system:
-      let pkgs = nixpkgs.legacyPackages.${system};
+      let
+        pkgs = import nixpkgs {
+          inherit system;
+          overlays = [ (import rust-overlay) ];
+        };
       in {
       devShells.default = pkgs.mkShell {
-        buildInputs = [
+        packages = [
           pkgs.cabal-install
           pkgs.ghc
           pkgs.cargo
-          pkgs.rustc
-          cargo-cabal.defaultPackage.${system}
+          pkgs.rust-bin.nightly.latest.default
+          pkgs.rust-analyzer
         ];
       };
       }
