@@ -1,1 +1,4 @@
-packages: ./fastcdc-hs ./test
+packages:
+  ./fastcdc-hs
+  ./fastcdc-hs-conduit
+  ./test
