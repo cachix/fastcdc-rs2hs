@@ -1,6 +1,6 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 
-module FastCdcRs
+module FastCDC.V2020.FFI
   ( nextChunk,
 
     -- * Types

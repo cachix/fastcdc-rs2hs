@@ -4,7 +4,7 @@ import Control.Exception (bracket)
 import Control.Monad (replicateM_)
 import qualified Data.ByteString as BS
 import Data.Text.Encoding
-import FastCdcRs
+import FastCDC.V2020.FFI
 import Foreign.C.String
 import Foreign.Marshal.Alloc
 import Foreign.Marshal.Array

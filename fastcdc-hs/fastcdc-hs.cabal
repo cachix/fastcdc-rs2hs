@@ -50,7 +50,7 @@ library
     import:           warnings
 
     -- Modules exported by the library.
-    exposed-modules:  FastCdcRs
+    exposed-modules:  FastCDC.V2020.FFI
 
     -- Modules included in this library but not exported.
     -- other-modules:
