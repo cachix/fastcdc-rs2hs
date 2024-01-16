@@ -1,11 +1,10 @@
 module Main where
 
 import Control.Exception (bracket)
-import Control.Monad (when)
+import Control.Monad (unless)
 import Control.Monad.Fix (fix)
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BS.Internal
-import Data.Text.Encoding
 import Data.Word
 import FastCDC.V2020.FFI
 import Foreign.C.Types
@@ -26,14 +25,16 @@ main = do
       [path] -> return path
       _otherwise -> error "Usage: fastcdc-sample <file>"
 
-  let chunkerOptions = ChunkerOptions {minChunkSize = 512, avgChunkSize = 1024, maxChunkSize = 4096}
+  let chunkerOptions = ChunkerOptions
+        { minChunkSize = 8 * 1024 
+        , avgChunkSize = 16 * 1024
+        , maxChunkSize = 32 * 1024
+        }
 
-  withChunker path chunkerOptions $ \chunker ->
-    fix $ \loop -> do
-      more <- inspectNextChunk chunker
-      when more loop
+  withChunker path chunkerOptions $ \chunk ->
+    putStrLn $ "Chunk: " <> show chunk
 
-withChunker :: FilePath -> ChunkerOptions -> (Ptr StreamCDC -> IO a) -> IO a
+withChunker :: FilePath -> ChunkerOptions -> (ChunkData -> IO ()) -> IO ()
 withChunker path chunkerOpts action = do
   withFile path ReadMode $ \handle -> do
     let readSome :: Ptr Word8 -> CSize -> IO CInt
@@ -49,24 +50,12 @@ withChunker path chunkerOpts action = do
 
     alloca $ \chunkerOptsPtr -> do
       poke chunkerOptsPtr chunkerOpts
-      bracket (c_chunker_new readFunPtr chunkerOptsPtr) c_chunker_free action
-
-inspectNextChunk :: Ptr StreamCDC -> IO Bool
-inspectNextChunk chunker = do
-  mchunk <- nextChunk chunker
-
-  case mchunk of
-    Nothing -> return False
-    Just chunk -> do
-      putStrLn $ "hs chunk: " <> show chunk
-
-      let size = fromIntegral (clength chunk)
-      if size == 0
-        then return False
-        else do
-          printChunk size (cdata chunk)
-          return True
+      bracket (c_chunker_new readFunPtr chunkerOptsPtr) c_chunker_free processChunks
   where
-    printChunk size cd = do
-      arr <- peekArray size cd
-      print $ decodeUtf8 (BS.pack arr)
+    processChunks chunker = do
+      mchunk <- nextChunk chunker
+      case mchunk of
+        Just chunk -> unless (clength chunk == 0) $ do
+            action chunk
+            processChunks chunker
+        Nothing -> return ()
