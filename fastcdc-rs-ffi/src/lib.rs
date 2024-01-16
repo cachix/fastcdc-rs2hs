@@ -52,7 +52,7 @@ pub struct ChunkData {
     hash: c_ulonglong,
     offset: c_ulonglong,
     length: c_size_t,
-    data: *mut c_char,
+    data: *mut c_uchar,
 }
 
 impl ChunkData {
