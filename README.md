@@ -2,8 +2,9 @@
 
 A Haskell wrapper around [fastcdc-rs](https://github.com/nlfiedler/fastcdc-rs).
 
-Run demo:
+## Building
 
 ```
-cabal run text sample.txt
+cargo cbuild -r --prefix=$PWD/target
+cargo cinstall -r --prefix=$PWD/target
 ```

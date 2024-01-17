@@ -1,4 +1,3 @@
 packages:
   ./fastcdc-hs
   ./fastcdc-hs-conduit
-  ./test
