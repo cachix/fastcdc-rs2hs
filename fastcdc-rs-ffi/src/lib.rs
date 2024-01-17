@@ -88,11 +88,13 @@ pub unsafe extern "C" fn chunker_new(
 
 #[no_mangle]
 pub unsafe extern "C" fn chunker_next(chunker: *mut fastcdc::StreamCDC<Reader>) -> *mut ChunkData {
-    let chunker = unsafe { &mut *chunker };
+    if chunker.is_null() {
+        return ptr::null_mut();
+    }
+    let chunker = &mut *chunker;
     match chunker.next() {
         Some(Ok(chunk)) => {
             let cc = ChunkData::from_chunk(chunk);
-            // println!("rs chunk: {:?}", cc);
             Box::into_raw(Box::new(cc))
         }
         Some(Err(_err)) => ptr::null_mut(),
@@ -107,5 +109,16 @@ pub unsafe extern "C" fn chunker_free(chunker: *mut fastcdc::StreamCDC<Reader>) 
 
 #[no_mangle]
 pub unsafe extern "C" fn chunk_free(chunk: *mut ChunkData) {
+    let chunk = Box::from_raw(chunk);
+    let _ = Box::from_raw(chunk.data);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn chunk_metadata_free(chunk: *mut ChunkData) {
+    let _ = Box::from_raw(chunk);
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn chunk_data_free(chunk: *mut u8) {
     let _ = Box::from_raw(chunk);
 }

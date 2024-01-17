@@ -5,10 +5,12 @@ module FastCDC.V2020
   ( FastCDCOptions (..),
     Chunk (..),
     withFastCDC,
+    runFastCDC,
   )
 where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
+import Control.Monad.Trans.Class (lift)
 import Control.Monad.Trans.Resource
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BS.Internal
@@ -51,8 +53,11 @@ data Chunk = Chunk
   }
   deriving stock (Show)
 
-withFastCDC :: forall m. (MonadIO m) => FastCDCOptions -> BS.ByteString -> (Chunk -> ResourceT m ()) -> ResourceT m ()
-withFastCDC options source action = do
+runFastCDC :: (MonadUnliftIO m) => FastCDCOptions -> (Int -> IO BS.ByteString) -> (Chunk -> m ()) -> m ()
+runFastCDC options source action = runResourceT $ withFastCDC options source action
+
+withFastCDC :: forall m. (MonadIO m) => FastCDCOptions -> (Int -> IO BS.ByteString) -> (Chunk -> m ()) -> ResourceT m ()
+withFastCDC options popper action = do
   (_, readFunPtr) <- allocate (FFI.c_wrap_reader_func readSome) freeHaskellFunPtr
 
   (_, chunkerOptsPtr) <- allocate malloc free
@@ -70,7 +75,7 @@ withFastCDC options source action = do
   where
     readSome :: Ptr Word8 -> CSize -> IO CInt
     readSome buf size = do
-      let bs = BS.take (fromIntegral size) source
+      bs <- popper (fromIntegral size)
       let (fp, offset, len) = BS.Internal.toForeignPtr bs
       liftIO $ withForeignPtr fp $ \p -> do
         let p' = p `plusPtr` offset
@@ -78,27 +83,42 @@ withFastCDC options source action = do
         return $ fromIntegral len
 
     processChunks :: FastCDC -> ResourceT m ()
-    processChunks chunker = do
-      mchunk <- liftIO $ nextChunk chunker
-      case mchunk of
-        Just chunk | len chunk /= 0 -> do
-          action chunk
-          processChunks chunker
-        _ -> return ()
+    processChunks chunker = go
+      where
+        go = do
+          mchunk <- liftIO $ nextChunk chunker
+          case mchunk of
+            Just chunk | len chunk /= 0 -> do
+              lift $ action chunk
+              go
+            _ -> return ()
 
 nextChunk :: (MonadIO m) => FastCDC -> m (Maybe Chunk)
 nextChunk (FastCDC chunkerFptr) = liftIO $
   withForeignPtr chunkerFptr $ \chunker -> do
     chunkPtr <- FFI.c_chunker_next chunker
+
     if chunkPtr == nullPtr
       then return Nothing
       else do
         chunk <- peek chunkPtr
-        FFI.c_chunk_free chunkPtr
+        let size = fromIntegral $ FFI.clength chunk
+
+        -- Copy the chunk data into Haskell. Slow.
+        -- bs <- BS.Internal.create size $ \p ->
+        --   copyBytes p (FFI.cdata chunk) size
+
+        -- Zero-copy ByteString.
+        fptr <- newForeignPtr FFI.c_chunk_data_free (FFI.cdata chunk)
+        let bs = BS.Internal.fromForeignPtr fptr 0 size
+
+        -- Free the chunk, but not the data.
+        FFI.c_chunk_metadata_free chunkPtr
+
         return $
           Just
             Chunk
               { hash = fromIntegral $ FFI.chash chunk,
-                len = fromIntegral $ FFI.clength chunk,
-                chunk = mempty -- TODO: implement
+                len = size,
+                chunk = bs
               }
