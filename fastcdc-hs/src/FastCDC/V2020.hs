@@ -1,3 +1,6 @@
+{-# LANGUAGE RankNTypes #-}
+{-# LANGUAGE ScopedTypeVariables #-}
+
 module FastCDC.V2020
   ( FastCDCOptions (..),
     Chunk (..),
@@ -5,7 +8,6 @@ module FastCDC.V2020
   )
 where
 
-import Control.Exception (bracket)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Resource
 import qualified Data.ByteString as BS
@@ -18,6 +20,18 @@ import Foreign.Marshal.Alloc
 import Foreign.Marshal.Utils
 import Foreign.Ptr
 import Foreign.Storable
+
+newtype FastCDC = FastCDC (ForeignPtr FFI.StreamCDC)
+
+newFastCDC :: FunPtr FFI.ReaderFunc -> Ptr FFI.ChunkerOptions -> IO FastCDC
+newFastCDC readFunPtr chunkerOptsPtr = do
+  chunker <- FFI.c_chunker_new readFunPtr chunkerOptsPtr
+
+  if chunker == nullPtr
+    then error "Failed to create chunker"
+    else do
+      fptr <- newForeignPtr FFI.c_chunker_free chunker
+      return $ FastCDC fptr
 
 data FastCDCOptions = FastCDCOptions
   { minChunkSize :: !Int,
@@ -37,28 +51,24 @@ data Chunk = Chunk
   }
   deriving stock (Show)
 
-withFastCDC :: (MonadIO m) => FastCDCOptions -> BS.ByteString -> (Chunk -> ResourceT m ()) -> ResourceT m ()
+withFastCDC :: forall m. (MonadIO m) => FastCDCOptions -> BS.ByteString -> (Chunk -> ResourceT m ()) -> ResourceT m ()
 withFastCDC options source action = do
-  readFunPtr <- liftIO $ FFI.c_wrap_reader_func readSome
+  (_, readFunPtr) <- allocate (FFI.c_wrap_reader_func readSome) freeHaskellFunPtr
 
-  (_, chunkerOptsPtr) <-
-    allocate
-      (malloc :: IO (Ptr FFI.ChunkerOptions))
-      free
-  liftIO $ do
+  (_, chunkerOptsPtr) <- allocate malloc free
+  liftIO $
     poke chunkerOptsPtr $
       FFI.ChunkerOptions
         { FFI.minChunkSize = fromIntegral $ minChunkSize options,
           FFI.avgChunkSize = fromIntegral $ avgChunkSize options,
           FFI.maxChunkSize = fromIntegral $ maxChunkSize options
         }
-  (_, chunker) <-
-    allocate
-      (FFI.c_chunker_new readFunPtr chunkerOptsPtr)
-      FFI.c_chunker_free
+
+  chunker <- liftIO $ newFastCDC readFunPtr chunkerOptsPtr
+
   processChunks chunker
   where
-    readSome :: (MonadIO m) => Ptr Word8 -> CSize -> m CInt
+    readSome :: Ptr Word8 -> CSize -> IO CInt
     readSome buf size = do
       let bs = BS.take (fromIntegral size) source
       let (fp, offset, len) = BS.Internal.toForeignPtr bs
@@ -67,16 +77,28 @@ withFastCDC options source action = do
         copyBytes buf p' len
         return $ fromIntegral len
 
-    -- processChunks :: Ptr FFI.StreamCDC -> m ()
+    processChunks :: FastCDC -> ResourceT m ()
     processChunks chunker = do
-      mchunk <- liftIO $ FFI.nextChunk chunker
+      mchunk <- liftIO $ nextChunk chunker
       case mchunk of
-        Just chunk | FFI.clength chunk /= 0 -> do
-          action $
+        Just chunk | len chunk /= 0 -> do
+          action chunk
+          processChunks chunker
+        _ -> return ()
+
+nextChunk :: (MonadIO m) => FastCDC -> m (Maybe Chunk)
+nextChunk (FastCDC chunkerFptr) = liftIO $
+  withForeignPtr chunkerFptr $ \chunker -> do
+    chunkPtr <- FFI.c_chunker_next chunker
+    if chunkPtr == nullPtr
+      then return Nothing
+      else do
+        chunk <- peek chunkPtr
+        FFI.c_chunk_free chunkPtr
+        return $
+          Just
             Chunk
               { hash = fromIntegral $ FFI.chash chunk,
                 len = fromIntegral $ FFI.clength chunk,
                 chunk = mempty -- TODO: implement
               }
-          processChunks chunker
-        _ -> return ()

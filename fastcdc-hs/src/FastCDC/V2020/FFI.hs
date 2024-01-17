@@ -1,9 +1,7 @@
 {-# LANGUAGE ForeignFunctionInterface #-}
 
 module FastCDC.V2020.FFI
-  ( nextChunk,
-
-    -- * Types
+  ( -- * Types
     StreamCDC,
     ChunkerOptions (..),
     ChunkData (..),
@@ -13,6 +11,7 @@ module FastCDC.V2020.FFI
     c_chunker_new,
     c_chunker_next,
     c_chunker_free,
+    c_chunk_free,
     c_wrap_reader_func,
   )
 where
@@ -85,11 +84,6 @@ foreign import ccall "chunker_new" c_chunker_new :: FunPtr ReaderFunc -> Ptr Chu
 
 foreign import ccall safe "chunker_next" c_chunker_next :: Ptr StreamCDC -> IO (Ptr ChunkData)
 
-foreign import ccall safe "chunker_free" c_chunker_free :: Ptr StreamCDC -> IO ()
+foreign import ccall safe "&chunker_free" c_chunker_free :: FunPtr (Ptr StreamCDC -> IO ())
 
-nextChunk :: Ptr StreamCDC -> IO (Maybe ChunkData)
-nextChunk chunker = do
-  cdata <- c_chunker_next chunker
-  if cdata == nullPtr
-    then return Nothing
-    else Just <$> peek cdata
+foreign import ccall safe "chunk_free" c_chunk_free :: Ptr ChunkData -> IO ()

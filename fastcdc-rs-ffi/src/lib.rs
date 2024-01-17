@@ -104,3 +104,8 @@ pub unsafe extern "C" fn chunker_next(chunker: *mut fastcdc::StreamCDC<Reader>) 
 pub unsafe extern "C" fn chunker_free(chunker: *mut fastcdc::StreamCDC<Reader>) {
     let _ = Box::from_raw(chunker);
 }
+
+#[no_mangle]
+pub unsafe extern "C" fn chunk_free(chunk: *mut ChunkData) {
+    let _ = Box::from_raw(chunk);
+}
