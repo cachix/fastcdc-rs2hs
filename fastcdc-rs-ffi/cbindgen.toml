@@ -1,0 +1,3 @@
+include_guard = "FASTCDC-RS-FFI_H"
+include_version = false
+language = "C"

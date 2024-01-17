@@ -1,10 +1,13 @@
 [package]
-name = "Cfastcdc-rs-ffi"
+name = "fastcdc-rs-ffi"
 version = "0.1.0"
 edition = "2021"
 
-[lib]
-crate-type = ["staticlib"]
-
 [dependencies]
 fastcdc = "3.1.0"
+
+[features]
+capi = []
+
+[package.metadata.capi.library]
+versioning = false

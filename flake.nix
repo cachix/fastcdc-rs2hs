@@ -24,9 +24,15 @@
           pkgs.cabal-install
           pkgs.ghc
           pkgs.cargo
+          pkgs.pkg-config
+          pkgs.cargo-c
           pkgs.rust-bin.nightly.latest.default
           pkgs.rust-analyzer
         ];
+
+        shellHook = ''
+          export PKG_CONFIG_PATH=$PWD/target/lib/pkgconfig
+        '';
       };
       }
     );
