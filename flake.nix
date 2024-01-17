@@ -32,6 +32,7 @@
 
         shellHook = ''
           export PKG_CONFIG_PATH=$PWD/target/lib/pkgconfig
+          export LD_LIBRARY_PATH=$PWD/target/lib
         '';
       };
       }
