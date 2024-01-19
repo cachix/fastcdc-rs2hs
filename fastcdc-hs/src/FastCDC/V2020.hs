@@ -6,11 +6,13 @@ module FastCDC.V2020
     Chunk (..),
     withFastCDC,
     runFastCDC,
+    newFastCDC',
+    nextChunk,
   )
 where
 
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Class (MonadTrans)
 import Control.Monad.Trans.Resource
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BS.Internal
@@ -53,12 +55,45 @@ data Chunk = Chunk
   }
   deriving stock (Show)
 
-runFastCDC :: (MonadUnliftIO m) => FastCDCOptions -> (Int -> IO BS.ByteString) -> (Chunk -> m ()) -> m ()
+runFastCDC :: (MonadUnliftIO m) => FastCDCOptions -> (Int -> IO BS.ByteString) -> (Chunk -> ResourceT m ()) -> m ()
 runFastCDC options source action = runResourceT $ withFastCDC options source action
 
-withFastCDC :: forall m. (MonadIO m) => FastCDCOptions -> (Int -> IO BS.ByteString) -> (Chunk -> m ()) -> ResourceT m ()
+newFastCDC' options popper = do
+  (_, readFunPtr) <-
+    allocate (FFI.c_wrap_reader_func readSome) freeHaskellFunPtr
+
+  (_, chunkerOptsPtr) <- allocate malloc free
+  liftIO $
+    poke chunkerOptsPtr $
+      FFI.ChunkerOptions
+        { FFI.minChunkSize = fromIntegral $ minChunkSize options,
+          FFI.avgChunkSize = fromIntegral $ avgChunkSize options,
+          FFI.maxChunkSize = fromIntegral $ maxChunkSize options
+        }
+
+  liftIO $ newFastCDC readFunPtr chunkerOptsPtr
+  where
+    readSome :: Ptr Word8 -> CSize -> IO CInt
+    readSome buf size = do
+      putStrLn "readSome"
+      bs <- popper (fromIntegral size)
+      putStrLn "readSome done"
+      let (fp, offset, len) = BS.Internal.toForeignPtr bs
+      withForeignPtr fp $ \p -> do
+        let p' = p `plusPtr` offset
+        copyBytes buf p' len
+        return $ fromIntegral len
+
+withFastCDC ::
+  forall t m.
+  (MonadIO (t m), MonadResource (t m), MonadTrans t) =>
+  FastCDCOptions ->
+  (Int -> IO BS.ByteString) ->
+  (Chunk -> t m ()) ->
+  t m ()
 withFastCDC options popper action = do
-  (_, readFunPtr) <- allocate (FFI.c_wrap_reader_func readSome) freeHaskellFunPtr
+  (_, readFunPtr) <-
+    allocate (FFI.c_wrap_reader_func readSome) freeHaskellFunPtr
 
   (_, chunkerOptsPtr) <- allocate malloc free
   liftIO $
@@ -77,26 +112,28 @@ withFastCDC options popper action = do
     readSome buf size = do
       bs <- popper (fromIntegral size)
       let (fp, offset, len) = BS.Internal.toForeignPtr bs
-      liftIO $ withForeignPtr fp $ \p -> do
+      withForeignPtr fp $ \p -> do
         let p' = p `plusPtr` offset
         copyBytes buf p' len
         return $ fromIntegral len
 
-    processChunks :: FastCDC -> ResourceT m ()
+    processChunks :: FastCDC -> t m ()
     processChunks chunker = go
       where
         go = do
           mchunk <- liftIO $ nextChunk chunker
           case mchunk of
             Just chunk | len chunk /= 0 -> do
-              lift $ action chunk
+              action chunk
               go
             _ -> return ()
 
 nextChunk :: (MonadIO m) => FastCDC -> m (Maybe Chunk)
 nextChunk (FastCDC chunkerFptr) = liftIO $
   withForeignPtr chunkerFptr $ \chunker -> do
+    liftIO $ putStrLn "c_chunker_next"
     chunkPtr <- FFI.c_chunker_next chunker
+    liftIO $ putStrLn "c_chunker_next done"
 
     if chunkPtr == nullPtr
       then return Nothing
