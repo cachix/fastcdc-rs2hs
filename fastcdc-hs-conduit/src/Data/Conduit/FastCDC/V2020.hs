@@ -1,7 +1,7 @@
 module Data.Conduit.FastCDC.V2020
   ( fastCDC,
     FastCDCOptions (..),
-    Chunk,
+    Chunk(..),
   )
 where
 
