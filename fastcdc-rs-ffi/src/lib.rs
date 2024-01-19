@@ -1,6 +1,7 @@
 #![feature(c_size_t)]
 #![feature(slice_ptr_get)]
 
+use core::cell::RefCell;
 use core::ffi::c_size_t;
 use fastcdc::v2020 as fastcdc;
 use std::{ffi::*, io::Read, ptr};
@@ -12,10 +13,18 @@ pub struct Reader {
 impl Read for Reader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
         let len = unsafe { (self.inner)(buf.as_mut_ptr(), buf.len()) };
-        if len < 0 {
-            Err(std::io::Error::new(std::io::ErrorKind::Other, "read error"))
-        } else {
-            Ok(len as usize)
+        match len {
+            -1 => Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "retry",
+            )),
+            l => {
+                if l < -1 {
+                    Err(std::io::Error::new(std::io::ErrorKind::Other, "read error"))
+                } else {
+                    Ok(l as usize)
+                }
+            }
         }
     }
 }
@@ -86,9 +95,17 @@ pub unsafe extern "C" fn chunker_new(
     Box::into_raw(Box::new(chunker))
 }
 
+// Store the last error string in a thread-local variable.
+thread_local! {
+    static LAST_ERROR: RefCell<Option<CString>> = RefCell::new(None);
+}
+
 #[no_mangle]
 pub unsafe extern "C" fn chunker_next(chunker: *mut fastcdc::StreamCDC<Reader>) -> *mut ChunkData {
     if chunker.is_null() {
+        LAST_ERROR.with(|prev| {
+            *prev.borrow_mut() = Some(CString::new("chunker is null").unwrap());
+        });
         return ptr::null_mut();
     }
     let chunker = &mut *chunker;
@@ -97,9 +114,27 @@ pub unsafe extern "C" fn chunker_next(chunker: *mut fastcdc::StreamCDC<Reader>) 
             let cc = ChunkData::from_chunk(chunk);
             Box::into_raw(Box::new(cc))
         }
-        Some(Err(_err)) => ptr::null_mut(),
-        None => ptr::null_mut(),
+        Some(Err(err)) => {
+            LAST_ERROR.with(|prev| {
+                *prev.borrow_mut() = CString::new(err.to_string()).ok();
+            });
+            ptr::null_mut()
+        }
+        None => {
+            LAST_ERROR.with(|prev| {
+                *prev.borrow_mut() = Some(CString::new("no more chunks").unwrap());
+            });
+            ptr::null_mut()
+        }
     }
+}
+
+#[no_mangle]
+pub unsafe extern "C" fn get_last_error() -> *const c_char {
+    LAST_ERROR.with(|prev| match *prev.borrow() {
+        Some(ref err) => err.as_ptr(),
+        None => ptr::null(),
+    })
 }
 
 #[no_mangle]

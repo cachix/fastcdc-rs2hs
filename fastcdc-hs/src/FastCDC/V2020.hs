@@ -4,6 +4,7 @@
 module FastCDC.V2020
   ( FastCDCOptions (..),
     Chunk (..),
+    ReadResponse (..),
     newFastCDC,
     withFastCDC,
     runFastCDC,
@@ -18,6 +19,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BS.Internal
 import Data.Word
 import qualified FastCDC.V2020.FFI as FFI
+import Foreign.C.String
 import Foreign.C.Types
 import Foreign.ForeignPtr
 import Foreign.Marshal.Alloc
@@ -45,7 +47,9 @@ data Chunk = Chunk
   }
   deriving stock (Show)
 
-type Popper = Int -> IO BS.ByteString
+data ReadResponse = EOF | Retry | Bytes !BS.ByteString
+
+type Popper = Int -> IO ReadResponse
 
 runFastCDC :: (MonadUnliftIO m) => FastCDCOptions -> Popper -> (Chunk -> ResourceT m ()) -> m ()
 runFastCDC options source action = runResourceT $ withFastCDC options source action
@@ -74,18 +78,22 @@ newFastCDC options popper = do
   where
     readSome :: Ptr Word8 -> CSize -> IO CInt
     readSome buf size = do
-      bs <- popper (fromIntegral size)
-      let (fp, offset, len) = BS.Internal.toForeignPtr bs
-      withForeignPtr fp $ \p -> do
-        let p' = p `plusPtr` offset
-        copyBytes buf p' len
-        return $ fromIntegral len
+      resp <- popper (fromIntegral size)
+      case resp of
+        Retry -> return (-1)
+        EOF -> return 0
+        Bytes bs -> do
+          let (fp, offset, len) = BS.Internal.toForeignPtr bs
+          withForeignPtr fp $ \p -> do
+            let p' = p `plusPtr` offset
+            copyBytes buf p' len
+            return $ fromIntegral len
 
 withFastCDC ::
   forall t m.
   (MonadIO (t m), MonadResource (t m), MonadTrans t) =>
   FastCDCOptions ->
-  (Int -> IO BS.ByteString) ->
+  Popper ->
   (Chunk -> t m ()) ->
   t m ()
 withFastCDC options popper action = do
@@ -109,7 +117,12 @@ nextChunk (FastCDC chunkerFptr) = liftIO $
     chunkPtr <- FFI.c_chunker_next chunker
 
     if chunkPtr == nullPtr
-      then return Nothing
+      then do
+        -- Fetch and print the last error
+        err <- FFI.c_get_last_error
+        -- Read and print the CString
+        peekCString err >>= putStrLn
+        return Nothing
       else do
         chunk <- peek chunkPtr
         let size = fromIntegral $ FFI.clength chunk

@@ -22,7 +22,7 @@ main = do
   size <-
     runConduitRes $
       sourceFile path
-        .| fastCDC (FastCDCOptions 4096 8192 16384)
+        .| fastCDC (FastCDCOptions (4 * 1024) (16 * 1024) (64 * 1024))
         -- Fetch the len of each Chunk and sum them up
         .| foldlC (\acc c -> acc + len c) 0
 

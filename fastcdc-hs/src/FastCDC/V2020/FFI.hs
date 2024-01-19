@@ -15,10 +15,12 @@ module FastCDC.V2020.FFI
     c_chunk_metadata_free,
     c_chunk_data_free,
     c_wrap_reader_func,
+    c_get_last_error,
   )
 where
 
 import Data.Word
+import Foreign.C.String
 import Foreign.C.Types
 import Foreign.Ptr
 import Foreign.Storable
@@ -93,3 +95,5 @@ foreign import ccall safe "chunk_free" c_chunk_free :: Ptr ChunkData -> IO ()
 foreign import ccall safe "chunk_metadata_free" c_chunk_metadata_free :: Ptr ChunkData -> IO ()
 
 foreign import ccall safe "&chunk_data_free" c_chunk_data_free :: FunPtr (Ptr Word8 -> IO ())
+
+foreign import ccall safe "get_last_error" c_get_last_error :: IO CString
