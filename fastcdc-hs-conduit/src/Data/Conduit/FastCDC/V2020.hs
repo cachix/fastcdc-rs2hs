@@ -13,7 +13,11 @@ import Data.ByteString (ByteString)
 import Data.ByteString qualified as BS
 import FastCDC.V2020 as FastCDC
 
-fastCDC :: forall t m. (MonadIO (t m), MonadResource (t m)) => FastCDCOptions -> ConduitT ByteString Chunk (t m) ()
+fastCDC ::
+  forall t m.
+  (MonadIO (t m), MonadResource (t m)) =>
+  FastCDCOptions ->
+  ConduitT ByteString Chunk (t m) ()
 fastCDC options = do
   cell <- liftIO newEmptyMVar
   leftovers <- liftIO newEmptyMVar
@@ -39,7 +43,7 @@ fastCDC options = do
                 return xs
               Nothing -> return mempty
 
-  chunker <- newFastCDC' options popper
+  chunker <- newFastCDC options popper
 
   fix $ \loop -> do
     mvar <- liftIO $ tryReadMVar cell <|> tryReadMVar leftovers
