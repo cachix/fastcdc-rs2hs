@@ -121,7 +121,7 @@ nextChunk (FastCDC chunkerFptr) = liftIO $
         -- Fetch and print the last error
         err <- FFI.c_get_last_error
         -- Read and print the CString
-        peekCString err >>= putStrLn
+        -- peekCString err >>= putStrLn
         return Nothing
       else do
         chunk <- peek chunkPtr
