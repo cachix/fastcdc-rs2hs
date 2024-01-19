@@ -19,14 +19,12 @@ fastCDC options = do
   leftovers <- liftIO newEmptyMVar
 
   let popper size = do
-        print "pooper"
         lmbs <- tryTakeMVar leftovers
         case lmbs of
           Just lbs -> do
             let (xs, leftover) = BS.splitAt (fromIntegral size) lbs
 
             unless (BS.null leftover) $ do
-              putStrLn $ "leftover bytes: " <> show (BS.length leftover)
               putMVar leftovers leftover
 
             return xs
@@ -35,11 +33,7 @@ fastCDC options = do
             case mbs of
               Just bs -> do
                 let (xs, leftover) = BS.splitAt (fromIntegral size) bs
-                putStrLn $ "requested bytes: " <> show size
-                putStrLn $ "got bytes: " <> show (BS.length bs)
-
                 unless (BS.null leftover) $ do
-                  putStrLn $ "leftover bytes: " <> show (BS.length leftover)
                   putMVar leftovers leftover
 
                 return xs
@@ -47,7 +41,6 @@ fastCDC options = do
 
   chunker <- newFastCDC' options popper
 
-  liftIO $ putStrLn "await forever"
   fix $ \loop -> do
     mvar <- liftIO $ tryReadMVar cell <|> tryReadMVar leftovers
     case mvar of
@@ -55,20 +48,14 @@ fastCDC options = do
         mbs <- await
         case mbs of
           Nothing -> do
-            liftIO $ putStrLn "chuking done"
             liftIO $ putMVar cell mempty
           Just bs -> do
-            liftIO $ putStrLn "putMVar"
             liftIO $ putMVar cell bs
             loop
       Just _ -> do
-        liftIO $ putStrLn "nextChunk"
         mchunk <- nextChunk chunker
-        liftIO $ putStrLn "got chunk"
         case mchunk of
           Just chunk -> do
-            liftIO $ putStrLn "yield chunk"
             yield chunk
-          Nothing -> do
-            liftIO $ putStrLn "no chunk"
+          Nothing -> return ()
         loop

@@ -75,9 +75,7 @@ newFastCDC' options popper = do
   where
     readSome :: Ptr Word8 -> CSize -> IO CInt
     readSome buf size = do
-      putStrLn "readSome"
       bs <- popper (fromIntegral size)
-      putStrLn "readSome done"
       let (fp, offset, len) = BS.Internal.toForeignPtr bs
       withForeignPtr fp $ \p -> do
         let p' = p `plusPtr` offset
@@ -131,9 +129,7 @@ withFastCDC options popper action = do
 nextChunk :: (MonadIO m) => FastCDC -> m (Maybe Chunk)
 nextChunk (FastCDC chunkerFptr) = liftIO $
   withForeignPtr chunkerFptr $ \chunker -> do
-    liftIO $ putStrLn "c_chunker_next"
     chunkPtr <- FFI.c_chunker_next chunker
-    liftIO $ putStrLn "c_chunker_next done"
 
     if chunkPtr == nullPtr
       then return Nothing
