@@ -42,6 +42,7 @@ data Chunk = Chunk
   { -- | The gear value as of the end of the chunk.
     -- TODO: we may want to newtype this to provide useful functions over the gear hash.
     hash :: !Word64,
+    offset :: !Word64,
     -- | Length of the chunk in bytes.
     len :: !Int,
     -- | Data of the chunk.
@@ -136,6 +137,7 @@ nextChunk (FastCDC chunkerFptr) = liftIO $
             Just
               Chunk
                 { hash = fromIntegral $ FFI.chash chunk,
+                  offset = fromIntegral $ FFI.coffset chunk,
                   len = size,
                   chunk = bs
                 }
