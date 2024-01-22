@@ -55,11 +55,7 @@ fastCDC options = do
       -- Process leftovers first
       Just _ -> do
         mchunk <- nextChunk chunker
-        -- mapM_ yield mchunk
-        case mchunk of
-          Just c -> do
-            yield c
-          Nothing -> return ()
+        mapM_ yield mchunk
         loop
       -- Fetch next input
       Nothing -> do
@@ -67,14 +63,14 @@ fastCDC options = do
         case mbs of
           Nothing -> do
             liftIO $ putMVar cell mempty
-            fix $ \floop -> do
+            -- Drain remaining chunks
+            fix $ \drain -> do
               mchunk <- nextChunk chunker
-              -- mapM_ yield mchunk
               case mchunk of
                 Just c -> do
                   yield c
-                  floop
-                Nothing -> do
+                  drain
+                Nothing ->
                   return ()
           Just bs -> do
             liftIO $ putMVar cell bs

@@ -11,6 +11,7 @@ module FastCDC.V2020.FFI
     c_chunker_new,
     c_chunker_next,
     c_chunker_free,
+    c_chunker_free_finalizer,
     c_chunk_free,
     c_chunk_metadata_free,
     c_chunk_data_free,
@@ -88,7 +89,9 @@ foreign import ccall "chunker_new" c_chunker_new :: FunPtr ReaderFunc -> Ptr Chu
 
 foreign import ccall safe "chunker_next" c_chunker_next :: Ptr StreamCDC -> IO (Ptr ChunkData)
 
-foreign import ccall safe "&chunker_free" c_chunker_free :: FunPtr (Ptr StreamCDC -> IO ())
+foreign import ccall safe "chunker_free" c_chunker_free :: Ptr StreamCDC -> IO ()
+
+foreign import ccall safe "&chunker_free" c_chunker_free_finalizer :: FunPtr (Ptr StreamCDC -> IO ())
 
 foreign import ccall safe "chunk_free" c_chunk_free :: Ptr ChunkData -> IO ()
 

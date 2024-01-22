@@ -12,6 +12,8 @@ module FastCDC.V2020
   )
 where
 
+import Control.Exception (bracket, bracketOnError)
+import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
 import Control.Monad.Trans.Class (MonadTrans)
 import Control.Monad.Trans.Resource
@@ -19,7 +21,7 @@ import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BS.Internal
 import Data.Word
 import qualified FastCDC.V2020.FFI as FFI
-import Foreign.C.String
+import Foreign.C.Error (throwErrno)
 import Foreign.C.Types
 import Foreign.ForeignPtr
 import Foreign.Marshal.Alloc
@@ -68,13 +70,12 @@ newFastCDC options popper = do
           FFI.maxChunkSize = fromIntegral $ maxChunkSize options
         }
 
-  chunkerPtr <- liftIO $ FFI.c_chunker_new readFunPtr chunkerOptsPtr
+  liftIO $ bracketOnError (FFI.c_chunker_new readFunPtr chunkerOptsPtr) FFI.c_chunker_free $ \chunkerPtr -> do
+    when (chunkerPtr == nullPtr) $
+      throwErrno "fastcdc-rs: failed to create chunker"
 
-  if chunkerPtr == nullPtr
-    then error "Failed to create chunker"
-    else do
-      fptr <- liftIO $ newForeignPtr FFI.c_chunker_free chunkerPtr
-      return $ FastCDC fptr
+    fptr <- newForeignPtr FFI.c_chunker_free_finalizer chunkerPtr
+    return $ FastCDC fptr
   where
     readSome :: Ptr Word8 -> CSize -> IO CInt
     readSome buf size = do
@@ -113,35 +114,28 @@ withFastCDC options popper action = do
 
 nextChunk :: (MonadIO m) => FastCDC -> m (Maybe Chunk)
 nextChunk (FastCDC chunkerFptr) = liftIO $
-  withForeignPtr chunkerFptr $ \chunker -> do
-    chunkPtr <- FFI.c_chunker_next chunker
+  withForeignPtr chunkerFptr $ \chunker ->
+    -- Free the chunk metadata, not the actual chunk data
+    bracket (FFI.c_chunker_next chunker) FFI.c_chunk_metadata_free $ \chunkPtr -> do
+      if chunkPtr == nullPtr
+        then do
+          -- TODO: figure out how we'd like to expose the error
+          -- err <- FFI.c_get_last_error
+          -- Read and print the CString
+          -- peekCString err >>= putStrLn
+          return Nothing
+        else do
+          chunk <- peek chunkPtr
+          let size = fromIntegral $ FFI.clength chunk
 
-    if chunkPtr == nullPtr
-      then do
-        -- Fetch and print the last error
-        err <- FFI.c_get_last_error
-        -- Read and print the CString
-        -- peekCString err >>= putStrLn
-        return Nothing
-      else do
-        chunk <- peek chunkPtr
-        let size = fromIntegral $ FFI.clength chunk
+          -- Zero-copy ByteString.
+          fptr <- newForeignPtr FFI.c_chunk_data_free (FFI.cdata chunk)
+          let bs = BS.Internal.fromForeignPtr fptr 0 size
 
-        -- Copy the chunk data into Haskell. Slow.
-        -- bs <- BS.Internal.create size $ \p ->
-        --   copyBytes p (FFI.cdata chunk) size
-
-        -- Zero-copy ByteString.
-        fptr <- newForeignPtr FFI.c_chunk_data_free (FFI.cdata chunk)
-        let bs = BS.Internal.fromForeignPtr fptr 0 size
-
-        -- Free the chunk, but not the data.
-        FFI.c_chunk_metadata_free chunkPtr
-
-        return $
-          Just
-            Chunk
-              { hash = fromIntegral $ FFI.chash chunk,
-                len = size,
-                chunk = bs
-              }
+          return $
+            Just
+              Chunk
+                { hash = fromIntegral $ FFI.chash chunk,
+                  len = size,
+                  chunk = bs
+                }

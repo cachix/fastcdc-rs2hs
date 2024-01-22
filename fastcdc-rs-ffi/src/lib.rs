@@ -97,7 +97,7 @@ pub unsafe extern "C" fn chunker_new(
 
 // Store the last error string in a thread-local variable.
 thread_local! {
-    static LAST_ERROR: RefCell<Option<CString>> = RefCell::new(None);
+    static LAST_ERROR: RefCell<Option<CString>> = const { RefCell::new(None) };
 }
 
 #[no_mangle]
@@ -108,6 +108,7 @@ pub unsafe extern "C" fn chunker_next(chunker: *mut fastcdc::StreamCDC<Reader>) 
         });
         return ptr::null_mut();
     }
+
     let chunker = &mut *chunker;
     match chunker.next() {
         Some(Ok(chunk)) => {
