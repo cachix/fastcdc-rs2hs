@@ -2,7 +2,6 @@ module Main where
 
 import Conduit
 import Data.Conduit.FastCDC.V2020
-import FastCDC.V2020 as FastCDC
 import System.CPUTime
 import System.Directory (getFileSize)
 import System.Environment (getArgs)
