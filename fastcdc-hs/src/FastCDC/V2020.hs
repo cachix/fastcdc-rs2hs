@@ -4,18 +4,24 @@
 module FastCDC.V2020
   ( FastCDCOptions (..),
     Chunk (..),
+    ReadResponse (..),
+    newFastCDC,
     withFastCDC,
     runFastCDC,
+    nextChunk,
   )
 where
 
+import Control.Exception (bracket, bracketOnError)
+import Control.Monad (when)
 import Control.Monad.IO.Class (MonadIO, liftIO)
-import Control.Monad.Trans.Class (lift)
+import Control.Monad.Trans.Class (MonadTrans)
 import Control.Monad.Trans.Resource
 import qualified Data.ByteString as BS
 import qualified Data.ByteString.Internal as BS.Internal
 import Data.Word
 import qualified FastCDC.V2020.FFI as FFI
+import Foreign.C.Error (throwErrno)
 import Foreign.C.Types
 import Foreign.ForeignPtr
 import Foreign.Marshal.Alloc
@@ -24,16 +30,6 @@ import Foreign.Ptr
 import Foreign.Storable
 
 newtype FastCDC = FastCDC (ForeignPtr FFI.StreamCDC)
-
-newFastCDC :: FunPtr FFI.ReaderFunc -> Ptr FFI.ChunkerOptions -> IO FastCDC
-newFastCDC readFunPtr chunkerOptsPtr = do
-  chunker <- FFI.c_chunker_new readFunPtr chunkerOptsPtr
-
-  if chunker == nullPtr
-    then error "Failed to create chunker"
-    else do
-      fptr <- newForeignPtr FFI.c_chunker_free chunker
-      return $ FastCDC fptr
 
 data FastCDCOptions = FastCDCOptions
   { minChunkSize :: !Int,
@@ -46,6 +42,7 @@ data Chunk = Chunk
   { -- | The gear value as of the end of the chunk.
     -- TODO: we may want to newtype this to provide useful functions over the gear hash.
     hash :: !Word64,
+    offset :: !Word64,
     -- | Length of the chunk in bytes.
     len :: !Int,
     -- | Data of the chunk.
@@ -53,12 +50,17 @@ data Chunk = Chunk
   }
   deriving stock (Show)
 
-runFastCDC :: (MonadUnliftIO m) => FastCDCOptions -> (Int -> IO BS.ByteString) -> (Chunk -> m ()) -> m ()
+data ReadResponse = EOF | Retry | Bytes !BS.ByteString
+
+type Popper = Int -> IO ReadResponse
+
+runFastCDC :: (MonadUnliftIO m) => FastCDCOptions -> Popper -> (Chunk -> ResourceT m ()) -> m ()
 runFastCDC options source action = runResourceT $ withFastCDC options source action
 
-withFastCDC :: forall m. (MonadIO m) => FastCDCOptions -> (Int -> IO BS.ByteString) -> (Chunk -> m ()) -> ResourceT m ()
-withFastCDC options popper action = do
-  (_, readFunPtr) <- allocate (FFI.c_wrap_reader_func readSome) freeHaskellFunPtr
+newFastCDC :: (MonadIO m, MonadResource m) => FastCDCOptions -> Popper -> m FastCDC
+newFastCDC options popper = do
+  (_, readFunPtr) <-
+    allocate (FFI.c_wrap_reader_func readSome) freeHaskellFunPtr
 
   (_, chunkerOptsPtr) <- allocate malloc free
   liftIO $
@@ -69,56 +71,73 @@ withFastCDC options popper action = do
           FFI.maxChunkSize = fromIntegral $ maxChunkSize options
         }
 
-  chunker <- liftIO $ newFastCDC readFunPtr chunkerOptsPtr
+  liftIO $ bracketOnError (FFI.c_chunker_new readFunPtr chunkerOptsPtr) FFI.c_chunker_free $ \chunkerPtr -> do
+    when (chunkerPtr == nullPtr) $
+      throwErrno "fastcdc-rs: failed to create chunker"
 
-  processChunks chunker
+    fptr <- newForeignPtr FFI.c_chunker_free_finalizer chunkerPtr
+    return $ FastCDC fptr
   where
     readSome :: Ptr Word8 -> CSize -> IO CInt
     readSome buf size = do
-      bs <- popper (fromIntegral size)
-      let (fp, offset, len) = BS.Internal.toForeignPtr bs
-      liftIO $ withForeignPtr fp $ \p -> do
-        let p' = p `plusPtr` offset
-        copyBytes buf p' len
-        return $ fromIntegral len
+      resp <- popper (fromIntegral size)
+      case resp of
+        Retry -> return (-1)
+        EOF -> return 0
+        Bytes bs -> do
+          let (fp, offset, len) = BS.Internal.toForeignPtr bs
+          withForeignPtr fp $ \p -> do
+            let p' = p `plusPtr` offset
+            copyBytes buf p' len
+            return $ fromIntegral len
 
-    processChunks :: FastCDC -> ResourceT m ()
+withFastCDC ::
+  forall t m.
+  (MonadIO (t m), MonadResource (t m), MonadTrans t) =>
+  FastCDCOptions ->
+  Popper ->
+  (Chunk -> t m ()) ->
+  t m ()
+withFastCDC options popper action = do
+  chunker <- newFastCDC options popper
+  processChunks chunker
+  where
+    processChunks :: FastCDC -> t m ()
     processChunks chunker = go
       where
         go = do
           mchunk <- liftIO $ nextChunk chunker
           case mchunk of
             Just chunk | len chunk /= 0 -> do
-              lift $ action chunk
+              action chunk
               go
             _ -> return ()
 
 nextChunk :: (MonadIO m) => FastCDC -> m (Maybe Chunk)
 nextChunk (FastCDC chunkerFptr) = liftIO $
-  withForeignPtr chunkerFptr $ \chunker -> do
-    chunkPtr <- FFI.c_chunker_next chunker
+  withForeignPtr chunkerFptr $ \chunker ->
+    -- Free the chunk metadata, not the actual chunk data
+    bracket (FFI.c_chunker_next chunker) FFI.c_chunk_metadata_free $ \chunkPtr -> do
+      if chunkPtr == nullPtr
+        then do
+          -- TODO: figure out how we'd like to expose the error
+          -- err <- FFI.c_get_last_error
+          -- Read and print the CString
+          -- peekCString err >>= putStrLn
+          return Nothing
+        else do
+          chunk <- peek chunkPtr
+          let size = fromIntegral $ FFI.clength chunk
 
-    if chunkPtr == nullPtr
-      then return Nothing
-      else do
-        chunk <- peek chunkPtr
-        let size = fromIntegral $ FFI.clength chunk
+          -- Zero-copy ByteString.
+          fptr <- newForeignPtr FFI.c_chunk_data_free (FFI.cdata chunk)
+          let bs = BS.Internal.fromForeignPtr fptr 0 size
 
-        -- Copy the chunk data into Haskell. Slow.
-        -- bs <- BS.Internal.create size $ \p ->
-        --   copyBytes p (FFI.cdata chunk) size
-
-        -- Zero-copy ByteString.
-        fptr <- newForeignPtr FFI.c_chunk_data_free (FFI.cdata chunk)
-        let bs = BS.Internal.fromForeignPtr fptr 0 size
-
-        -- Free the chunk, but not the data.
-        FFI.c_chunk_metadata_free chunkPtr
-
-        return $
-          Just
-            Chunk
-              { hash = fromIntegral $ FFI.chash chunk,
-                len = size,
-                chunk = bs
-              }
+          return $
+            Just
+              Chunk
+                { hash = fromIntegral $ FFI.chash chunk,
+                  offset = fromIntegral $ FFI.coffset chunk,
+                  len = size,
+                  chunk = bs
+                }

@@ -11,9 +11,9 @@ import System.IO (IOMode (ReadMode))
 options :: FastCDCOptions
 options =
   FastCDCOptions
-    { minChunkSize = 8 * 1024,
+    { minChunkSize = 4 * 1024,
       avgChunkSize = 16 * 1024,
-      maxChunkSize = 32 * 1024
+      maxChunkSize = 64 * 1024
     }
 
 main :: IO ()
@@ -24,6 +24,6 @@ main = do
     _otherwise -> error "Usage: fastcdc <file>"
 
   withFile path ReadMode $ \handle -> do
-    let popper = BS.hGetSome handle
+    let popper size = Bytes <$> BS.hGetSome handle size
     runResourceT $ withFastCDC options popper $ \c ->
       liftIO $ putStrLn $ "Chunk: " <> "hash=" <> show (hash c) <> " size=" <> show (len c)

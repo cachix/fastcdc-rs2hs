@@ -30,7 +30,7 @@ library
     exposed-modules:  FastCDC.V2020
     other-modules:    FastCDC.V2020.FFI
     default-extensions: DerivingStrategies, NamedFieldPuns
-    build-depends:    base, bytestring, resourcet, transformers
+    build-depends:    base, bytestring, resourcet, transformers, unliftio-core
     hs-source-dirs:   src
     default-language: Haskell2010
     pkgconfig-depends: fastcdc_rs_ffi
